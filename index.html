@@ -1,1 +1,56 @@
 
+
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Free Video Editor</title>
+<style>
+body{background:#111;color:white;font-family:Arial,sans-serif;padding:18px}
+h2{color:#55e6a5}
+video{width:100%;background:#222;border-radius:12px}
+.panel{background:#222;padding:14px;border-radius:12px}
+button{padding:12px;background:#55e6a5;border:0;border-radius:8px;margin:8px 0}
+label{display:block;margin-top:12px}
+</style>
+</head>
+<body>
+<h2>✂ Free Video Editor</h2>
+<div class="panel">
+<label>ভিডিও নির্বাচন করো</label>
+<input type="file" id="file" accept="video/*">
+<video id="video" controls playsinline></video>
+<label>শুরুর সময় (সেকেন্ড)</label>
+<input id="start" type="number" min="0" value="0">
+<label>শেষের সময় (সেকেন্ড)</label>
+<input id="end" type="number" min="0" value="10">
+<button onclick="previewCut()">কাট প্রিভিউ</button>
+<p id="status">প্রথমে ভিডিও নির্বাচন করো।</p>
+</div>
+<script>
+const file=document.getElementById('file');
+const video=document.getElementById('video');
+const status=document.getElementById('status');
+file.onchange=()=>{
+ if(!file.files[0])return;
+ video.src=URL.createObjectURL(file.files[0]);
+ video.onloadedmetadata=()=>{
+ document.getElementById('end').value=Math.floor(video.duration);
+ status.textContent='ভিডিও লোড হয়েছে।';
+ };
+};
+function previewCut(){
+ const s=Number(document.getElementById('start').value);
+ const e=Number(document.getElementById('end').value);
+ if(!video.src||s<0||e<=s||e>video.duration){
+ status.textContent='সঠিক ভিডিও ও সময় নির্বাচন করো।';return;
+ }
+ video.currentTime=s;video.play();
+ video.ontimeupdate=()=>{
+ if(video.currentTime>=e){video.pause();video.ontimeupdate=null;}
+ };
+}
+</script>
+</body>
+</html>

@@ -1,5 +1,4 @@
 
-
 <!DOCTYPE html>
 <html lang="bn">
 <head>
@@ -7,50 +6,183 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Free Video Editor</title>
 <style>
-body{background:#111;color:white;font-family:Arial,sans-serif;padding:18px}
+body{margin:0;padding:16px;background:#111;color:white;font-family:Arial,sans-serif}
 h2{color:#55e6a5}
-video{width:100%;background:#222;border-radius:12px}
-.panel{background:#222;padding:14px;border-radius:12px}
-button{padding:12px;background:#55e6a5;border:0;border-radius:8px;margin:8px 0}
-label{display:block;margin-top:12px}
+.panel{background:#222;padding:16px;border-radius:12px;margin-bottom:14px}
+label{display:block;margin:14px 0 7px}
+input,button{box-sizing:border-box;max-width:100%;padding:11px;border-radius:7px}
+input[type=number]{width:100%;background:#333;color:white;border:1px solid #555}
+input[type=file]{width:100%}
+button{background:#55e6a5;color:#111;border:0;font-weight:bold;margin-top:12px;width:100%}
+video,audio{width:100%;margin-top:10px}
+input[type=range]{width:100%}
+#status{white-space:pre-wrap;overflow-wrap:anywhere}
+a{color:#55e6a5}
 </style>
 </head>
 <body>
-<h2>✂ Free Video Editor</h2>
+<h2>✂️ Free Video Editor</h2>
+
 <div class="panel">
-<label>ভিডিও নির্বাচন করো</label>
-<input type="file" id="file" accept="video/*">
-<video id="video" controls playsinline></video>
-<label>শুরুর সময় (সেকেন্ড)</label>
+<label>১. ভিডিও নির্বাচন করো</label>
+<input id="videoFile" type="file" accept="video/*">
+<video id="preview" controls playsinline></video>
+
+<label>ভিডিওর শুরুর সময় (সেকেন্ড)</label>
 <input id="start" type="number" min="0" value="0">
-<label>শেষের সময় (সেকেন্ড)</label>
+
+<label>ভিডিওর শেষের সময় (সেকেন্ড)</label>
 <input id="end" type="number" min="0" value="10">
-<button onclick="previewCut()">কাট প্রিভিউ</button>
-<p id="status">প্রথমে ভিডিও নির্বাচন করো।</p>
 </div>
+
+<div class="panel">
+<h3>🎵 ভিডিওতে গান যোগ করো</h3>
+<label>২. ফোন থেকে গান নির্বাচন করো (MP3/WAV)</label>
+<input id="audioFile" type="file" accept="audio/*">
+<audio id="audioPreview" controls></audio>
+
+<label>গানের ভলিউম: <span id="volumeText">70%</span></label>
+<input id="volume" type="range" min="0" max="100" value="70">
+</div>
+
+<div class="panel">
+<button id="makeBtn">🎬 গানসহ MP4 ভিডিও তৈরি করো</button>
+<p id="status">প্রথমে ভিডিও এবং চাইলে একটি গান নির্বাচন করো।</p>
+<progress id="progress" value="0" max="100" style="width:100%"></progress>
+<a id="download" hidden>⬇️ তৈরি ভিডিও ডাউনলোড করো</a>
+</div>
+
+<script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
 <script>
-const file=document.getElementById('file');
-const video=document.getElementById('video');
-const status=document.getElementById('status');
-file.onchange=()=>{
- if(!file.files[0])return;
- video.src=URL.createObjectURL(file.files[0]);
- video.onloadedmetadata=()=>{
- document.getElementById('end').value=Math.floor(video.duration);
- status.textContent='ভিডিও লোড হয়েছে।';
- };
-};
-function previewCut(){
- const s=Number(document.getElementById('start').value);
- const e=Number(document.getElementById('end').value);
- if(!video.src||s<0||e<=s||e>video.duration){
- status.textContent='সঠিক ভিডিও ও সময় নির্বাচন করো।';return;
- }
- video.currentTime=s;video.play();
- video.ontimeupdate=()=>{
- if(video.currentTime>=e){video.pause();video.ontimeupdate=null;}
- };
-}
+const $ = id => document.getElementById(id);
+let videoURL = null, audioURL = null, resultURL = null;
+let ffmpeg = null;
+
+$('videoFile').addEventListener('change', () => {
+  const file = $('videoFile').files[0];
+  if (!file) return;
+  if (videoURL) URL.revokeObjectURL(videoURL);
+  videoURL = URL.createObjectURL(file);
+  $('preview').src = videoURL;
+  $('preview').onloadedmetadata = () => {
+    $('end').value = Math.floor($('preview').duration);
+    $('status').textContent = 'ভিডিও নির্বাচিত হয়েছে। চাইলে গান নির্বাচন করো।';
+  };
+});
+
+$('audioFile').addEventListener('change', () => {
+  const file = $('audioFile').files[0];
+  if (!file) return;
+  if (audioURL) URL.revokeObjectURL(audioURL);
+  audioURL = URL.createObjectURL(file);
+  $('audioPreview').src = audioURL;
+});
+
+$('volume').addEventListener('input', () => {
+  $('volumeText').textContent = $('volume').value + '%';
+});
+
+$('makeBtn').addEventListener('click', async () => {
+  const video = $('videoFile').files[0];
+  const audio = $('audioFile').files[0];
+  const start = Number($('start').value);
+  const end = Number($('end').value);
+  const status = $('status');
+  const btn = $('makeBtn');
+
+  if (!video) {
+    status.textContent = 'আগে একটি ভিডিও নির্বাচন করো।';
+    return;
+  }
+  if (!(end > start) || start < 0 || end > $('preview').duration) {
+    status.textContent = 'ভিডিওর শুরুর ও শেষের সময় ঠিক করো।';
+    return;
+  }
+
+  btn.disabled = true;
+  $('download').hidden = true;
+  $('progress').value = 0;
+
+  try {
+    if (!window.FFmpeg) {
+      throw new Error('ভিডিও প্রসেসিং লাইব্রেরি লোড হয়নি। ইন্টারনেট সংযোগ পরীক্ষা করো।');
+    }
+
+    if (!ffmpeg) {
+      status.textContent = 'ভিডিও প্রসেসিং ইঞ্জিন লোড হচ্ছে... প্রথমবার সময় লাগতে পারে।';
+      ffmpeg = FFmpeg.createFFmpeg({
+        log: false,
+        corePath: 'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js',
+        progress: ({ ratio }) => {
+          $('progress').value = Math.max(0, Math.min(100, Math.round(ratio * 100)));
+        }
+      });
+      await ffmpeg.load();
+    }
+
+    const ext = name => {
+      const m = name.match(/\.([a-zA-Z0-9]+)$/);
+      return m ? m[1].toLowerCase() : 'bin';
+    };
+    const videoName = 'input.' + ext(video.name);
+    const outputName = 'edited.mp4';
+
+    ffmpeg.FS('writeFile', videoName, new Uint8Array(await video.arrayBuffer()));
+
+    const duration = end - start;
+    const vol = Number($('volume').value) / 100;
+    let args;
+
+    if (audio) {
+      const audioName = 'music.' + ext(audio.name);
+      ffmpeg.FS('writeFile', audioName, new Uint8Array(await audio.arrayBuffer()));
+      args = [
+        '-ss', String(start), '-i', videoName,
+        '-i', audioName, '-t', String(duration),
+        '-map', '0:v:0', '-map', '1:a:0',
+        '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2',
+        '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28',
+        '-c:a', 'aac', '-af', 'volume=' + vol,
+        '-shortest', '-movflags', '+faststart', outputName
+      ];
+    } else {
+      args = [
+        '-ss', String(start), '-i', videoName,
+        '-t', String(duration),
+        '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2',
+        '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28',
+        '-c:a', 'aac', '-movflags', '+faststart', outputName
+      ];
+    }
+
+    status.textContent = 'ভিডিও তৈরি হচ্ছে। এই সময় পেজ বন্ধ করবে না...';
+    await ffmpeg.run(...args);
+
+    const data = ffmpeg.FS('readFile', outputName);
+    const blob = new Blob([data.buffer], { type: 'video/mp4' });
+    if (resultURL) URL.revokeObjectURL(resultURL);
+    resultURL = URL.createObjectURL(blob);
+
+    const link = $('download');
+    link.href = resultURL;
+    link.download = 'my-edited-video.mp4';
+    link.hidden = false;
+    link.textContent = '⬇️ গানসহ MP4 ভিডিও ডাউনলোড করো';
+    status.textContent = 'কাজ শেষ! নিচের ডাউনলোড লিংকে চাপ দাও।';
+    $('progress').value = 100;
+
+    try {
+      ffmpeg.FS('unlink', videoName);
+      ffmpeg.FS('unlink', outputName);
+      if (audio) ffmpeg.FS('unlink', 'music.' + ext(audio.name));
+    } catch (_) {}
+  } catch (err) {
+    status.textContent = 'ভিডিও তৈরি হয়নি: ' + (err.message || err) +
+      '\nইন্টারনেট পরীক্ষা করো, ছোট ভিডিও দিয়ে আবার চেষ্টা করো।';
+  } finally {
+    btn.disabled = false;
+  }
+});
 </script>
 </body>
 </html>
